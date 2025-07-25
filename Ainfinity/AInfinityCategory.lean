@@ -43,9 +43,11 @@ def three_dimensional_space := (sample_quiver.data 0 0) 3
 def five_five_five_vector : three_dimensional_space := fun j ↦ (5 : ℂ)
 -/
 
+/-
 inductive DegreeChain (β : Type) where
   | singleton : β → DegreeChain β
   | longer : β → DegreeChain β → DegreeChain β
+-/
 
 /- Sign policy:
 In order to define A∞-relations etc., we need to assign signs to elements of the
@@ -55,17 +57,27 @@ grading type β. Policy:
 -/
 
 /-- additive signs as ℤ/2ℤ -/
-abbrev Sign := ZMod 2      -- values:  0 or 1
+abbrev Parity := ZMod 2      -- values:  0 or 1
 /-- A degree type that can produce a sign. -/
-class HasSign (β : Type) where
-  toSign : β → Sign
+class HasParity.{u} (β : Type u) where
+  toParity : β → Parity
 
-instance : HasSign (ZMod 2) where
-  toSign n := n
-instance : HasSign ℤ where
-  toSign n := if Even n then 0 else 1
+instance : HasParity (ZMod 2) where
+  toParity n := n
+instance : HasParity ℤ where
+  toParity n := if Even n then 0 else 1
 
-def signOf {β} [HasSign β] (d : β) : Sign := HasSign.toSign d
+def parityOf {β} [HasParity β] (d : β) : Parity := HasParity.toParity d
+
+
+/-
+Integer cast policy:
+In order to define the degree |a_k| + … + |a_1| + 2-k we need to be able to cast
+integers into type β.
+• β obtains an attribute IntCast β.
+-/
+
+class GradingCore (β : Type u) extends AddCommGroup β, IntCast β, HasParity β
 
 /- Chain policy:
 We have the choice either to
@@ -79,44 +91,89 @@ operations and Stasheff identities. We get ergonomic building blocks
 plus a strict layer when definitional equalities really matter.
 -/
 
-def morphism_degree {β : Type} {obj : Type} {quiver : GQuiver β obj} {X Y : obj} {deg : β} (morphism : (quiver.data X Y) deg) : β :=
+def morphism_degree {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u,v,w} β obj} {X Y : obj} {deg : β} (morphism : (quiver.data X Y) deg) : β :=
   deg
 
-inductive HomogeneousChain {β : Type} {obj : Type} [HasSign β] (quiver : GQuiver β obj) : obj → obj → Type where
+inductive HomogeneousChain.{u, v, w} {β : Type u} [GradingCore β] {obj : Type v} (quiver : GQuiver.{u, v, w} β obj) : obj → obj → Sort _ where
   | empty {X Y : obj}  : HomogeneousChain quiver X Y
   | longer {X Y Z: obj} {deg : β} : (quiver.data X Z) deg → HomogeneousChain quiver Z Y → HomogeneousChain quiver X Y
 
-def HomogeneousChain.total_deg {β : Type} {obj : Type} [HasSign β] {quiver : GQuiver β obj} {X Y : obj} (chain : HomogeneousChain quiver X Y) : Sign :=
+def HomogeneousChain.total_deg {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : β :=
   match chain with
-  | HomogeneousChain.empty => (0 : Sign)
-  | HomogeneousChain.longer morphism rest => signOf (morphism_degree morphism) + HomogeneousChain.total_deg rest
+  | HomogeneousChain.empty => (0 : β)
+  | HomogeneousChain.longer morphism rest => (morphism_degree morphism : β) + HomogeneousChain.total_deg rest
 
+def HomogeneousChain.total_reduced_deg {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : β :=
+  match chain with
+  | HomogeneousChain.empty => (0 : β)
+  | HomogeneousChain.longer morphism rest => (morphism_degree morphism : β) + (-1 : ℤ) + HomogeneousChain.total_reduced_deg rest
+
+def HomogeneousChain.length {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : ℕ :=
+  match chain with
+  | HomogeneousChain.empty => (0 : ℕ)
+  | HomogeneousChain.longer morphism rest => 1 + HomogeneousChain.length rest
+
+def HomogeneousChain.correct_output_degree {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u,v,w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : β :=
+  (HomogeneousChain.total_deg chain) + ((2 : ℤ) - (HomogeneousChain.length chain : ℤ))
 
 /-
-input: chain = a_1, …, a_k; j ∈ ℕ
-output: ‖a_1‖ + … + ‖a_j‖
+input: chain a_1, …, a_k with a_i: X_i → X_{i+1}
+input: j ∈ {1, …, k+1}
+output: X_j
 -/
-def HomogeneousChain.Koszul_sign {β : Type} {obj : Type} {quiver : GQuiver β obj} {X Y : obj} [HasSign β] (chain : HomogeneousChain quiver X Y) (j : ℕ): Sign :=
-  if j = 0 then
-    0
-  else
-    match chain with
-    | HomogeneousChain.empty => 0
-    | HomogeneousChain.longer morphism rest => signOf (morphism_degree morphism) + HomogeneousChain.Koszul_sign rest (j - 1)
+def HomogeneousChain.index_object {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : ℕ) : obj :=
+  match chain with
+  | HomogeneousChain.empty => X
+  | HomogeneousChain.longer morphism rest => match j with
+    | 0 => X -- fake
+    | 1 => X
+    | Nat.succ (Nat.succ k) => HomogeneousChain.index_object chain (k+1)
 
+/-
+input: chain a_1, …, a_k with a_i: X_i → X_{i+1}
+input: j ∈ {1, …, k+1}
+output: a_j
+-/
+def HomogeneousChain.index_morphism {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj}
+  (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : ℕ) : obj :=
+
+/-
+  {in_bounds : 1 ≤ j ∧ j ≤ HomogeneousChain.length chain} : obj := by
+
+  cases chain
+  · have empty_is_length_0 : empty.length = 0 := by sorry
+    rw [empty_is_length_0] at in_bounds
+    sorry
+
+  ·
+-/
+
+  match chain with
+  | HomogeneousChain.empty => -- fake! What to put here
+  | HomogeneousChain.longer morphism rest => match j with
+   | 0 => X -- fake
+   | 1 => X
+   | Nat.succ (Nat.succ k) => HomogeneousChain.index_object chain (k+1)
 
 -----------------------------
 
 
+/-
+Design question: Should we implement Hom(X, Y) = ⊕ Hom^i (X, Y) or keep all Hom's graded?
+
+In the below implementation, Hom is a Pi type which is not what the A∞ homs are.
+Rather we need a direct sum type (not to be confused with Sigma type),
+i.e. a function which takes inputs (b : β) and outputs elements of type (self.data […])
+but only has nonzero values on finitely many b's. How to do it efficiently?
+
 def GQuiver.Hom {β : Type} {V : Type} [self : GQuiver β V] (X Y : V) : Type :=
   Π b, self.data (β:=β) X Y b
-
 open GQuiver
-
 
 inductive GChain {β : Type} {obj : Type} [self : GQuiver β obj] : obj → obj → Type where
   | nil : {X Y : obj} → (self.Hom β X Y) → GChain (β:=β) X Y
   | cons : {X Y Z : obj} → GChain (β:=β) X Y → (self.Hom β Y Z) → GChain (β:=β) X Z
+-/
 
 /-
   A non-unital $$A_∞$$ category is the data of all $$μ^d$$ compositions of $d$ morphisms
@@ -124,11 +181,35 @@ inductive GChain {β : Type} {obj : Type} [self : GQuiver β obj] : obj → obj 
 
   $$μ^1$$ is called the "differential."
   $$μ^2$$ will be the usual composition.
+
+Implementation philosophy:
+
+1) There are various more or less correct ways to implement the datum of A∞-products:
+a) for all non-homogeneous chains simultaneously.
+b) for homogeneous chains only, and the datum includes proof that the output has the correct degree.
+c) for homogeneous chains only, and not requiring that the output has a correct degree.
+We decided to stick with option c). In particular this means that μ takes an additional parameter
+output_deg.
+
+2) The μ = mu method.
+
+inputs:
+X Y : two objects
+chain : a HomogeneousChain a_1, …, a_k from X to Y
+output_deg : an element of type β
+
+outputs:
+the part of μ^k (a_k, …, a_1) lying in degree output_deg.
+It is of type ((self.data X Y) output_deg).
+
 -/
 
-class AInfinityCategoryStruct (β : Type) (obj : Type) extends GQuiver β obj : Type 2 where
+-- Its type is Type (max u v (w+1))
+class AInfinityCategoryStruct.{u, v, w} (β : Type u) [GradingCore β] (obj : Type v) extends GQuiver.{u, v, w} β obj where
   /-- All possible compositions of chains of morphisms. -/
-  mu : ∀ {X Y : obj}, GChain β X Y → Hom β X Y
+  mu {X Y : obj} (chain : HomogeneousChain toGQuiver X Y) (output_deg : β) :
+    let correct_degree := HomogeneousChain.correct_output_degree chain
+    (toGQuiver.data X Y) correct_degree
 
 scoped infixr:80 " μ " => AInfinityCategoryStruct.mu -- type as \mu
 
@@ -137,27 +218,41 @@ scoped infixr:80 " μ " => AInfinityCategoryStruct.mu -- type as \mu
 
 -- set_option diagnostics true
 
-class AInfinityPreadditive [AddCommMonoid β] (obj : Type) extends AInfinityCategoryStruct β obj where
-  homGroup : ∀ X Y : obj, GCommMonoid (Hom β X Y) := by infer_instance
 
-/- The typeclass `Category C` describes morphisms associated to objects of type `C`.
-The universe levels of the objects and morphisms are unconstrained, and will often need to be
-specified explicitly, as `Category.{v} C`. (See also `LargeCategory` and `SmallCategory`.)
+/-
+-- Design philosophy: Layer A∞-structure by algebraic strength.
+-- Start minimal (just graded sets), add structure only when needed.
 
-@[pp_with_univ, stacks 0014]
-class Category (obj : Type u) extends CategoryStruct.{v} obj : Type max u (v + 1) where
-  /-- Identity morphisms are left identities for composition. -/
-  id_comp : ∀ {X Y : obj} (f : X ⟶ Y), 𝟙 X ≫ f = f := by aesop_cat
-  /-- Identity morphisms are right identities for composition. -/
-  comp_id : ∀ {X Y : obj} (f : X ⟶ Y), f ≫ 𝟙 Y = f := by aesop_cat
-  /-- Composition in a category is associative. -/
-  assoc : ∀ {W X Y Z : obj} (f : W ⟶ X) (g : X ⟶ Y) (h : Y ⟶ Z), (f ≫ g) ≫ h = f ≫ g ≫ h := by
-    aesop_cat
+| Level | Extra structure on `Hom β X Y`            | Purpose                                | Encoded in                |
+|-------|-------------------------------------------|----------------------------------------|---------------------------|
+| 0     | none                                      | raw graded morphisms                   | `GQuiver`                 |
+| 1     | `AddCommMonoid` (or `AddCommGroup`)       | signs, sums, linear μₙ                 | `AInfinityPreadditive`    |
+| 2     | `Module R` over a `Semiring R`            | scalar multiplication, linearity       | `AInfinityLinear R`       |
+| 3     | `Module R` over a `Semiring R`            | A∞-relations hold over R               | `AInfinityCategory R`     |
+
+Unitality comes after this!
+
+Use only as much structure as your use case requires.
 -/
 
-class AInfinityCategory (β : Type w) (obj : Type u)
-  extends AInfinityCategoryStruct.{w, u, v} β obj : Type max (w+1) max u (v + 1)
-  where
+@[pp_with_univ, stacks 0014]
+class AInfinityPreadditive.{u,v,w} (β : Type u) [GradingCore β] (obj : Type v) extends AInfinityCategoryStruct.{u,v,w} β obj where
+  hom_is_monoid: ∀ (X Y : obj) (b : β), AddCommMonoid ((toGQuiver.data X Y) b)
+
+@[pp_with_univ, stacks 0014]
+class AInfinityLinear.{u,v,w,x} (β : Type u) [GradingCore β] (obj : Type v) (R : Type x) [Semiring R] extends AInfinityPreadditive.{u,v,w} β obj where
+  hom_is_module : ∀ (X Y : obj) (b : β), Module R ((toGQuiver.data X Y) b)
+  hom_is_monoid := by
+      intro X Y b
+      -- `Module R _` → `AddCommMonoid _` is an instance in mathlib
+      infer_instance
+  mu_is_multilinear :
+    {X Y : obj} →
+    (chain : HomogeneousChain toGQuiver X Y) →
+    (index : ℕ) →
+    let X_i :=
+    let Y_i :=
+    (alternative : toGQuiver )
 
 /- A category is called `R`-linear if `P ⟶ Q` is an `R`-module such that composition is
     `R`-linear in both variables. -/
@@ -183,10 +278,14 @@ class Preadditive where
     aesop_cat
 -/
 
--- this fixes a general (not-yet-linear) (not-yet-small) A_∞ category
-variable
--- this fixes a general type of allowed gradings of Hom-spaces (most commonly take ℤ)
-variable {ι : Type v} [AddMonoid ι]
+/-
+  /-- Identity morphisms are left identities for composition. -/
+  id_comp : ∀ {X Y : obj} (f : X ⟶ Y), 𝟙 X ≫ f = f := by aesop_cat
+  /-- Identity morphisms are right identities for composition. -/
+  comp_id : ∀ {X Y : obj} (f : X ⟶ Y), f ≫ 𝟙 Y = f := by aesop_cat
+  /-- Composition in a category is associative. -/
+  assoc : ∀ {W X Y Z : obj} (f : W ⟶ X) (g : X ⟶ Y) (h : Y ⟶ Z), (f ≫ g) ≫ h = f ≫ g ≫ h := by
+    aesop_cat
 
 class AInfinityLinear (K : Type u) [Field K]
   (A : Type u) [AInfinityCategory.{max (max u v)} A] [Preadditive A]  where
@@ -201,3 +300,5 @@ class AInfinityLinear (K : Type u) [Field K]
   /-- compatibility of the scalar multiplication with the pre-composition -/
   comp_smul : ∀ (X Y Z : A) (f : X ⟶ Y) (r : R) (g : Y ⟶ Z), f ≫ (r • g) = r • f ≫ g := by
     aesop_cat
+
+-/
