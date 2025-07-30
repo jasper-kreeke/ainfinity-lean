@@ -43,41 +43,65 @@ def three_dimensional_space := (sample_quiver.data 0 0) 3
 def five_five_five_vector : three_dimensional_space := fun j ↦ (5 : ℂ)
 -/
 
-/-
-inductive DegreeChain (β : Type) where
-  | singleton : β → DegreeChain β
-  | longer : β → DegreeChain β → DegreeChain β
--/
-
-/- Sign policy:
+/- Grading policy:
 In order to define A∞-relations etc., we need to assign signs to elements of the
 grading type β. Policy:
 • β remains arbitrary type
-• assume β has conversion to ±1
+• Assume β has conversion to ℤ or ℤ/2ℤ
+• Not assume that there is a cast ℤ → β.
+
+In consequence,
+• Sign is computed via β → (ℤ or ℤ/2ℤ) → ℤ/2ℤ
+• Correct degree of μ(a_k, …, a_1) does not exist. Rather, for every output term t
+  of this μ, we must have that its conversion to (ℤ or ℤ/2ℤ) given by (conv (deg t))
+  satisfies (conv (deg t)) = deg a_1 + … + deg a_k + (2-k)   [inside ℤ or ℤ/2ℤ].
 -/
+
+inductive Int_or_Parity where
+  | int
+  | parity
 
 /-- additive signs as ℤ/2ℤ -/
 abbrev Parity := ZMod 2      -- values:  0 or 1
-/-- A degree type that can produce a sign. -/
-class HasParity.{u} (β : Type u) where
-  toParity : β → Parity
 
-instance : HasParity (ZMod 2) where
-  toParity n := n
-instance : HasParity ℤ where
-  toParity n := if Even n then 0 else 1
+def correct_type (kind : Int_or_Parity) : Type 0 :=
+  match kind with
+  | Int_or_Parity.int => ℤ
+  | Int_or_Parity.parity => Parity
 
-def parityOf {β} [HasParity β] (d : β) : Parity := HasParity.toParity d
+class Has_Int_or_Parity.{u} (β : Type u) where
+  kind : Int_or_Parity
+  conv : β → (correct_type kind)
+
+instance : Has_Int_or_Parity (ZMod 2) where
+  kind := Int_or_Parity.parity
+  conv := fun n ↦ n
+
+instance : Has_Int_or_Parity ℤ where
+  kind := Int_or_Parity.int
+  conv := fun n ↦ n
+
+def parityOf {β} [inst : Has_Int_or_Parity β] (d : β) : Parity := by
+  cases h : inst.kind
+
+  -- case int
+  have intermediate := (inst.conv d)
+  have h : correct_type (Has_Int_or_Parity.kind β) = ℤ := by
+    simpa [correct_type] using congrArg correct_type h
+  have result : ℤ := by
+    simpa [h] using intermediate
+  exact (result : Parity)
+
+  -- case parity
+  have intermediate := (inst.conv d)
+  have h : correct_type (Has_Int_or_Parity.kind β) = Parity := by
+    simpa [correct_type] using congrArg correct_type h
+  have result : Parity := by
+    simpa [h] using intermediate
+  exact (result : Parity)
 
 
-/-
-Integer cast policy:
-In order to define the degree |a_k| + … + |a_1| + 2-k we need to be able to cast
-integers into type β.
-• β obtains an attribute IntCast β.
--/
-
-class GradingCore (β : Type u) extends AddCommGroup β, IntCast β, HasParity β
+class GradingCore (β : Type u) extends AddCommGroup β, Has_Int_or_Parity β
 
 /- Chain policy:
 We have the choice either to
@@ -103,15 +127,73 @@ def HomogeneousChain.total_deg {β : Type u} [GradingCore β] {obj : Type v} {qu
   | HomogeneousChain.empty => (0 : β)
   | HomogeneousChain.longer morphism rest => (morphism_degree morphism : β) + HomogeneousChain.total_deg rest
 
-def HomogeneousChain.total_reduced_deg {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : β :=
-  match chain with
-  | HomogeneousChain.empty => (0 : β)
-  | HomogeneousChain.longer morphism rest => (morphism_degree morphism : β) + (-1 : ℤ) + HomogeneousChain.total_reduced_deg rest
-
 def HomogeneousChain.length {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : ℕ :=
   match chain with
   | HomogeneousChain.empty => (0 : ℕ)
   | HomogeneousChain.longer morphism rest => 1 + HomogeneousChain.length rest
+
+def source {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} {b : β} (morphism : (quiver.data X Y) b) : obj :=
+  X
+
+def target {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} {b : β} (morphism : (quiver.data X Y) b) : obj :=
+  Y
+
+/-
+input: chain a_1, …, a_k with a_i: X_i → X_{i+1}
+input: j ∈ {1, …, k+1}
+output: X_j
+-/
+def HomogeneousChain.index_object {β : Type u} [inst : GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : PNat) {in_bounds : j ≤ chain.length} : obj :=
+  match chain with
+  | HomogeneousChain.empty =>
+    by
+      have h : chain.length = 0 := by simp [length] at in_bounds
+      tauto
+
+  | HomogeneousChain.longer first rest =>
+      match (j : ℕ) with
+      | 0 => by
+        sorry
+      | 1 => source first
+      | l+2 => by
+        have h : 0 < l+1 := by linarith
+        have l_plus_one : PNat := ⟨l+1, h⟩
+        have sub_in_bounds : l_plus_one ≤ rest.length := by
+          have auxiliary : (l_plus_one : ℕ) ≤ rest.length := by sorry
+          tauto
+        exact @HomogeneousChain.index_object β inst obj quiver (target first) Y rest l_plus_one sub_in_bounds
+
+/-
+          -- n = 1 ⇒ we're at the target of the first morphism
+          by_cases h₁ : n' = 0
+          · -- n = 1
+            simpa [h₁] using m.trg                -- or `source m`, depending on conventions
+          · -- n ≥ 2  ⇒  drop first morphism and recurse
+            -- provide the new bound `n' ≤ rest.length`
+            have hrest : (n' : ℕ) ≤ rest.length := by
+              -- from  n' + 1 ≤ 1 + rest.length  ⇒  n' ≤ rest.length
+              simpa [length, add_comm, add_left_comm] using
+                (Nat.le_of_succ_le_succ (show n'.succ ≤ _ from h))
+            -- build the smaller positive index `⟨n', _⟩`
+            have hpos' : (0 : ℕ) < n' := by
+              have : n' ≠ 0 := h₁
+              exact Nat.pos_of_ne_zero this
+            exact ih ⟨n', hpos'⟩ hrest
+-/
+
+/-
+  | HomogeneousChain.longer first rest =>
+    match j with
+    | ⟨1, _⟩ => source first
+    | ⟨(Nat.succ l : PNat), _⟩ => HomogeneousChain.index_object rest l
+-/
+
+#check PNat
+
+def HomogeneousChain.subchain {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) (first : PNat) (last : PNat) {in_bounds : last ≤ HomogeneousChain.length chain}: HomogeneousChain [fill this] :=
+  match last with
+  | first => HomogeneousChain.longer chain.first HomogeneousChain.subchain chain (first+1) last
+
 
 def HomogeneousChain.correct_output_degree {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u,v,w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) : β :=
   (HomogeneousChain.total_deg chain) + ((2 : ℤ) - (HomogeneousChain.length chain : ℤ))
@@ -119,42 +201,35 @@ def HomogeneousChain.correct_output_degree {β : Type u} [GradingCore β] {obj :
 /-
 input: chain a_1, …, a_k with a_i: X_i → X_{i+1}
 input: j ∈ {1, …, k+1}
-output: X_j
--/
-def HomogeneousChain.index_object {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj} (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : ℕ) : obj :=
-  match chain with
-  | HomogeneousChain.empty => X
-  | HomogeneousChain.longer morphism rest => match j with
-    | 0 => X -- fake
-    | 1 => X
-    | Nat.succ (Nat.succ k) => HomogeneousChain.index_object chain (k+1)
-
-/-
-input: chain a_1, …, a_k with a_i: X_i → X_{i+1}
-input: j ∈ {1, …, k+1}
 output: a_j
 -/
 def HomogeneousChain.index_morphism {β : Type u} [GradingCore β] {obj : Type v} {quiver : GQuiver.{u, v, w} β obj} {X Y : obj}
-  (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : ℕ) : obj :=
+  (chain : HomogeneousChain.{u,v,w} quiver X Y) (j : ℕ)
+  {in_bounds : 1 ≤ j ∧ j ≤ HomogeneousChain.length chain} : (quiver.data X Y) (deg) :=
 
-/-
-  {in_bounds : 1 ≤ j ∧ j ≤ HomogeneousChain.length chain} : obj := by
+  match chain with
+  | HomogeneousChain.empty => by
+    simp [length] at in_bounds
+    linarith
+  | HomogeneousChain.longer first rest => match j with
+    | 0 => first
+    | k+1 => HomogeneousChain.index_morphism rest k
 
-  cases chain
-  · have empty_is_length_0 : empty.length = 0 := by sorry
+
+/-  · have empty_is_length_0 : empty.length = 0 := by sorry
     rw [empty_is_length_0] at in_bounds
     sorry
 
   ·
--/
-
+  -/
+/-
   match chain with
   | HomogeneousChain.empty => -- fake! What to put here
   | HomogeneousChain.longer morphism rest => match j with
    | 0 => X -- fake
    | 1 => X
    | Nat.succ (Nat.succ k) => HomogeneousChain.index_object chain (k+1)
-
+-/
 -----------------------------
 
 
