@@ -1,3 +1,4 @@
 /.lake
 /build/
 lake-manifest.json
+.DS_Store
