@@ -1,103 +1,38 @@
 import Mathlib
 
-open ChainComplex CategoryTheory DirectSum GradedMonoid GradedObject
+import Ainfinity.Grading
+import Ainfinity.HomogeneousChain
+
+/- open ChainComplex CategoryTheory DirectSum GradedMonoid GradedObject -/
 
 
 namespace AInfinityCategoryTheory
 
 /- Blueprint:
 
--- Quiver struct
--- graded chain of morphisms
--- chain of morphisms (optional)
-
 -- total degree
 -- sign
 -- ∀ graded chains of morphisms: correct degree
 -- ∀ graded chains of morphisms: A∞-rels with signs
 
+Tasks:
+1) Define μ: Chain → Hom
+2) tilde{μ}: Inhomogeneous chains → Hom
+3) [obsolete by Kim Morrison's advice]
+4) implement A∞ relations for μ
+5) if μ satisfies A∞-relations, then also tilde{μ}.
+
+Jasper: 1+2
+Marco: 3+4
 -/
 
-universe a
-variable (C : Type a) [Category C]
-
-
-
-/- Examples:
--- Cpow i is meant to denote the vector space ℂ^i.
-def Cpow (i : ℕ) := Fin i → ℂ
-#check Cpow 6
-
--- sample quiver: obj = Fin 1; β = ℤ; data(0, 0) = i ↦ ℂ^i
-def sample_quiver : GQuiver ℤ (Fin 1) :=
-  {data := fun X Y ↦ (fun i ↦ if i ≥ 0 then Cpow i.toNat else Cpow 0: (GradedObject ℤ Type))}
-
--- test extracting Hom^3 type.
-def three_dimensional_space := (sample_quiver.data 0 0) 3
-def five_five_five_vector : three_dimensional_space := fun j ↦ (5 : ℂ)
--/
-
-
-/-
-Design question: Should we implement Hom(X, Y) = ⊕ Hom^i (X, Y) or keep all Hom's graded?
-
-In the below implementation, Hom is a Pi type which is not what the A∞ homs are.
-Rather we need a direct sum type (not to be confused with Sigma type),
-i.e. a function which takes inputs (b : β) and outputs elements of type (self.data […])
-but only has nonzero values on finitely many b's. How to do it efficiently?
-
-def GQuiver.Hom {β : Type} {V : Type} [self : GQuiver β V] (X Y : V) : Type :=
-  Π b, self.data (β:=β) X Y b
-open GQuiver
-
-inductive GChain {β : Type} {obj : Type} [self : GQuiver β obj] : obj → obj → Type where
-  | nil : {X Y : obj} → (self.Hom β X Y) → GChain (β:=β) X Y
-  | cons : {X Y Z : obj} → GChain (β:=β) X Y → (self.Hom β Y Z) → GChain (β:=β) X Z
--/
-
-/-
-  A non-unital $$A_∞$$ category is the data of all $$μ^d$$ compositions of $d$ morphisms
-  for all $$d ∈ ℕ, d ≥ 1$$, subject to the conditions written in the AInfinityCategory class.
-
-  $$μ^1$$ is called the "differential."
-  $$μ^2$$ will be the usual composition.
-
-Implementation philosophy:
-
-1) There are various more or less correct ways to implement the datum of A∞-products:
-a) for all non-homogeneous chains simultaneously.
-b) for homogeneous chains only, and the datum includes proof that the output has the correct degree.
-c) for homogeneous chains only, and not requiring that the output has a correct degree.
-We decided to stick with option c). In particular this means that μ takes an additional parameter
-output_deg.
-
-2) The μ = mu method.
-
-inputs:
-X Y : two objects
-chain : a HomogeneousChain a_1, …, a_k from X to Y
-output_deg : an element of type β
-
-outputs:
-the part of μ^k (a_k, …, a_1) lying in degree output_deg.
-It is of type ((self.data X Y) output_deg).
-
--/
 
 -- Its type is Type (max u v (w+1))
 class AInfinityCategoryStruct.{u, v, w} (β : Type u) [GradingCore β] (obj : Type v) extends GQuiver.{u, v, w} β obj where
   /-- All possible compositions of chains of morphisms. -/
-  mu {X Y : obj} (chain : HomogeneousChain toGQuiver X Y) (output_deg : β) :
-    let correct_degree := HomogeneousChain.correct_output_degree chain
-    (toGQuiver.data X Y) correct_degree
+  μ {X Y : obj} (chain : HomogeneousChain X Y): (toGQuiver.data X Y) (correct_output_deg chain)
 
 scoped infixr:80 " μ " => AInfinityCategoryStruct.mu -- type as \mu
-
--- TODO: lift this from the usual Quiver to the GQuiver
--- initialize_simps_projections AInfinityCategoryStruct (-toQuiver_Hom)
-
--- set_option diagnostics true
-
 
 /-
 -- Design philosophy: Layer A∞-structure by algebraic strength.
@@ -118,6 +53,114 @@ Use only as much structure as your use case requires.
 @[pp_with_univ, stacks 0014]
 class AInfinityPreadditive.{u,v,w} (β : Type u) [GradingCore β] (obj : Type v) extends AInfinityCategoryStruct.{u,v,w} β obj where
   hom_is_monoid: ∀ (X Y : obj) (b : β), AddCommMonoid ((toGQuiver.data X Y) b)
+
+def addcommmonoid_to_zero {G : Type u} (s : AddCommMonoid G) : Zero.{u} G where
+  zero := (0 : G)
+
+@[simp]
+def toInhomQuiver {β : Type u} [GradingCore β] {obj : Type v} (C : AInfinityPreadditive.{u, v, w} β obj) : Quiver obj where
+  Hom X Y := @DFinsupp β (C.data X Y) (fun i ↦ addcommmonoid_to_zero (C.hom_is_monoid X Y i))
+
+abbrev InhomogeneousChain.{u, v, w} {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} (X : obj) (Y : obj) :=
+  @Quiver.Path obj (toInhomQuiver C) X Y
+
+/-
+Plan:
+β, length ↦ β^length
+inhom_path ↦ (function β^length → homog_path)
+inhom_path ↦ (β^length → homog_path →(μ) final chains)
+inhom_path ↦ Sum (final chains)
+-/
+
+/-
+Alternative plan:
+inhom path of length 1 ↦ (function β → homogeneous_chain)
+inhom path of length 2 ↦ (function β → (function β → homogeneous_chain))
+inhom path of length 3 ↦ (function β → (function β → (function β → homogeneous_chain)))
+
+Now sum:
+for an inhom path of length 1 is simply dfinsupp.sum of that function
+for an inhom path of length 2 is summing up and for each i : β it should add the
+  β → homogeneous chain  item, but not as a function but if you add them up you should
+  instead do a different addition namely μ(v_1, -, …)
+  i.e. g should turn a function β → homogeneous chain into inhomogeneous_chain.
+  In other words g is the same function with one less recursion depth.
+-/
+
+def el : DFinsupp (fun n : ℕ ↦ ℤ) := by
+  have aux : ℕ → ℤ := by
+    intro n
+    match n with
+    | 0 => exact 5
+    | i+1 => exact 0
+  use aux
+  -- use Trunc.mk { s // ∀ (i : ℕ), i ∈ s ∨ aux i = 0 }
+
+/-
+structure TEST where
+  A : ℕ
+  B : ℤ
+
+def test : TEST := by
+  refine ⟨?S, ?T⟩
+-/
+
+/-
+def get_huge_type {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) (offset : ℕ) : Type _ :=
+  match offset with
+  | k ≤ chain.length => @DFinsupp β get_huge_type chain (offset + 1))
+  | chain.length =>
+-/
+
+-- for length = 1
+def add_up_1 chain : Hom :=
+  coercer = el ↦ μ(el)
+  first = chain.first
+  first.sum coercer
+
+def add_up_2 chain : Hom :=
+  coercer = el1 ↦ add_up [μ(el1, ); chain]
+  first = chain.first
+  first.sum coercer
+
+-- for length = 1
+def add_up_1 {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) {h : @Quiver.Path.length obj (toInhomQuiver C) X Y chain = 1} : (toInhomQuiver C).Hom X Y :=
+  match chain with
+  | @Quiver.Path.nil obj (toInhomQuiver C) _ => sorry
+  | @Quiver.Path.cons obj (toInhomQuiver C) _ _ _ most last => by
+    dsimp at last
+    have components : b : β ↦ last b : (toInhomQuiver C).Hom X Y b)
+    have dfinsupp := @DFinsupp β
+
+def create_large_evaluation {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
+
+
+
+def add_up {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
+  match chain with
+  | @Quiver.Path.nil obj (toInhomQuiver C) _ => by dsimp; exact 0
+  | @Quiver.Path.cons obj (toInhomQuiver C) _ _ _ most last => by
+    dsimp
+    -- have h : (i : β) → Zero (C.data X Y i) := sorry
+    -- refine ⟨?func, ?supp_hyp⟩
+    have aux := fun b : β ↦ add_up most
+
+def get_grading_combo_type {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : Type u :=
+  Fin (@Quiver.Path.length obj (toInhomQuiver C) X Y chain) → β
+
+/-
+def inhomog_path_into_components {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : ℕ :=
+  let combo_type := get_grading_combo_type chain
+  let combo_map := fun combo : combo_type ↦ chain
+  -- (combo : combo_type) →
+  5
+-/
+
+def μ_on_inhomogeneous {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
+  sorry
+
+
+
 
 @[pp_with_univ, stacks 0014]
 class AInfinityLinear.{u,v,w,x} (β : Type u) [GradingCore β] (obj : Type v) (R : Type x) [Semiring R] extends AInfinityPreadditive.{u,v,w} β obj where
