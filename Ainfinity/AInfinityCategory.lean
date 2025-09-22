@@ -5,6 +5,9 @@ import Ainfinity.HomogeneousChain
 
 /- open ChainComplex CategoryTheory DirectSum GradedMonoid GradedObject -/
 
+-- This one necessary (in current implementation) for the expand
+attribute [local instance] Classical.decEq
+noncomputable section
 
 namespace AInfinityCategoryTheory
 
@@ -30,7 +33,7 @@ Marco: 3+4
 -- Its type is Type (max u v (w+1))
 class AInfinityCategoryStruct.{u, v, w} (β : Type u) [GradingCore β] (obj : Type v) extends GQuiver.{u, v, w} β obj where
   /-- All possible compositions of chains of morphisms. -/
-  μ {X Y : obj} (chain : HomogeneousChain X Y): (toGQuiver.data X Y) (correct_output_deg chain)
+  mu {X Y : obj} (chain : HomogeneousChain X Y): (toGQuiver.data X Y) (correct_output_deg chain)
 
 scoped infixr:80 " μ " => AInfinityCategoryStruct.mu -- type as \mu
 
@@ -64,100 +67,86 @@ def toInhomQuiver {β : Type u} [GradingCore β] {obj : Type v} (C : AInfinityPr
 abbrev InhomogeneousChain.{u, v, w} {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} (X : obj) (Y : obj) :=
   @Quiver.Path obj (toInhomQuiver C) X Y
 
-/-
-Plan:
-β, length ↦ β^length
-inhom_path ↦ (function β^length → homog_path)
-inhom_path ↦ (β^length → homog_path →(μ) final chains)
-inhom_path ↦ Sum (final chains)
--/
+-- Convenience: the inhomogeneous Hom type at (X,Y)
+abbrev InHom {β : Type u} [GradingCore β] {obj : Type v}
+  (C : AInfinityPreadditive.{u,v,w} β obj) (X Y : obj) : Type _ :=
+  (toInhomQuiver C).Hom X Y
 
 /-
-Alternative plan:
-inhom path of length 1 ↦ (function β → homogeneous_chain)
-inhom path of length 2 ↦ (function β → (function β → homogeneous_chain))
-inhom path of length 3 ↦ (function β → (function β → (function β → homogeneous_chain)))
+**expand**
+helper function to perform multilinear expansion of μ.
 
-Now sum:
-for an inhom path of length 1 is simply dfinsupp.sum of that function
-for an inhom path of length 2 is summing up and for each i : β it should add the
-  β → homogeneous chain  item, but not as a function but if you add them up you should
-  instead do a different addition namely μ(v_1, -, …)
-  i.e. g should turn a function β → homogeneous chain into inhomogeneous_chain.
-  In other words g is the same function with one less recursion depth.
+input:
+  `acc`  = (vₖ, …, v_{ℓ+1}), a homogeneous chain Y ⟶ Z
+  `rest` = (v_ℓ, …, v₁), an inhomogeneous chain X ⟶ Y
+
+output:
+  μ(vₖ, …, v₁), as an inhomogeneous morphism X ⟶ Z
+
+procedure:
+  * if ℓ = 0:
+      evaluate μ on the homogeneous chain `acc`,
+      place the result in the DFinsupp fiber indexed by its output degree.
+  * if ℓ > 0:
+      - split `v_ℓ` into graded components `(d,m)`,
+      - call `expand` on (vₖ, …, v_{ℓ+1}, m) and (v_{ℓ-1}, …, v₁),
+      - finally sum over all choices for `d` using `DFinsupp.sum`.
+
+  * the `sorry`s currently stand in for decidability and AddCommMonoid
+    obligations needed to run `DFinsupp.sum`.
+  * once those are filled, the “aux2/aux3/refine” scaffolding can
+    likely be inlined into a single `exact e.sum (γ := …) …`.
 -/
+def expand {β : Type u} [GradingCore β]
+  {obj : Type v} (C : AInfinityPreadditive.{u,v,w} β obj)
+  {X Y Z: obj}
+  (acc : HomogeneousChain (gquiver := C.toGQuiver) Y Z)
+  (rest : InhomogeneousChain (C := C) X Y) :
+  InHom (C) X Z := by
 
-def el : DFinsupp (fun n : ℕ ↦ ℤ) := by
-  have aux : ℕ → ℤ := by
-    intro n
-    match n with
-    | 0 => exact 5
-    | i+1 => exact 0
-  use aux
-  -- use Trunc.mk { s // ∀ (i : ℕ), i ∈ s ∨ aux i = 0 }
+  cases rest with
+
+  -- case nil
+  | nil =>
+  let b := correct_output_deg (gquiver := C.toGQuiver) acc
+  let _ : AddCommMonoid ((C.data X Z) b) := C.hom_is_monoid X Z b
+  let _ : ∀ i, Zero ((C.data X Z) i) := fun i =>
+    addcommmonoid_to_zero (C.hom_is_monoid X Z i)
+  exact DFinsupp.single b (C.toAInfinityCategoryStruct.mu (β := β) (obj := obj) acc)
+
+  -- case cons
+  | @cons Y' _ most e =>
+  let summing_func := fun d (m : (C.data Y' Y) d) =>
+    let m_as_path : @Quiver.Path obj (toQuiver C.toGQuiver) Y' Y :=
+      @Quiver.Hom.toPath obj (toQuiver C.toGQuiver) Y' Y ⟨d, m⟩
+    let new_acc : HomogeneousChain (gquiver := C.toGQuiver) Y' Z := @Quiver.Path.comp obj (toQuiver C.toGQuiver) Y' Y Z m_as_path acc
+    expand C new_acc most
+
+  /- Complete and inline this later on. -/
+  have aux2 := @e.sum (γ := (InHom C X Z))
+  have dec : DecidableEq β := by sorry
+  have aux3 := aux2 dec
+  refine aux3 ?dec2 ?add summing_func
+  -- prove dec2
+  · sorry
+  -- prove add
+  · sorry
 
 /-
-structure TEST where
-  A : ℕ
-  B : ℤ
+**mu_on_inhomogeneous_chain**
+multilinear expansion of μ on inhomogeneous chains.
 
-def test : TEST := by
-  refine ⟨?S, ?T⟩
+input: (v_k, …, v_1).
+output: μ(v_k, …, v_1).
 -/
-
-/-
-def get_huge_type {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) (offset : ℕ) : Type _ :=
-  match offset with
-  | k ≤ chain.length => @DFinsupp β get_huge_type chain (offset + 1))
-  | chain.length =>
--/
-
--- for length = 1
-def add_up_1 chain : Hom :=
-  coercer = el ↦ μ(el)
-  first = chain.first
-  first.sum coercer
-
-def add_up_2 chain : Hom :=
-  coercer = el1 ↦ add_up [μ(el1, ); chain]
-  first = chain.first
-  first.sum coercer
-
--- for length = 1
-def add_up_1 {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) {h : @Quiver.Path.length obj (toInhomQuiver C) X Y chain = 1} : (toInhomQuiver C).Hom X Y :=
-  match chain with
-  | @Quiver.Path.nil obj (toInhomQuiver C) _ => sorry
-  | @Quiver.Path.cons obj (toInhomQuiver C) _ _ _ most last => by
-    dsimp at last
-    have components : b : β ↦ last b : (toInhomQuiver C).Hom X Y b)
-    have dfinsupp := @DFinsupp β
-
-def create_large_evaluation {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
-
-
-
-def add_up {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
-  match chain with
-  | @Quiver.Path.nil obj (toInhomQuiver C) _ => by dsimp; exact 0
-  | @Quiver.Path.cons obj (toInhomQuiver C) _ _ _ most last => by
-    dsimp
-    -- have h : (i : β) → Zero (C.data X Y i) := sorry
-    -- refine ⟨?func, ?supp_hyp⟩
-    have aux := fun b : β ↦ add_up most
-
-def get_grading_combo_type {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : Type u :=
-  Fin (@Quiver.Path.length obj (toInhomQuiver C) X Y chain) → β
-
-/-
-def inhomog_path_into_components {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : ℕ :=
-  let combo_type := get_grading_combo_type chain
-  let combo_map := fun combo : combo_type ↦ chain
-  -- (combo : combo_type) →
-  5
--/
-
-def μ_on_inhomogeneous {β : Type u} [GradingCore β] {obj : Type v} {C : AInfinityPreadditive.{u, v, w} β obj} {X : obj} {Y : obj} (chain : InhomogeneousChain.{u, v, w} (C := C) X Y) : (toInhomQuiver C).Hom X Y :=
-  sorry
+def mu_on_inhomogeneous_chain
+  {β : Type u} [GradingCore β]
+  {obj : Type v} (C : AInfinityPreadditive.{u,v,w} β obj)
+  {X Y : obj}
+  (chain : InhomogeneousChain (C := C) X Y) :
+  InHom C X Y :=
+  -- start with empty homogeneous accumulator (X = Z)
+  expand C (@Quiver.Path.nil obj (toQuiver C.toGQuiver) Y) chain
 
 
 
